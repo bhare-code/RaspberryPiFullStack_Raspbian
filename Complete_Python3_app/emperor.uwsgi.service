@@ -1,0 +1,18 @@
+[Unit]
+Description=uWSGI Emperor
+After=syslog.target
+
+[Service]
+ExecStart=/var/www/lab_app/bin/uwsgi --ini /var/www/lab_app/lab_app_uwsgi.ini
+# Requires systemd version 211 or newer
+RuntimeDirectory=uwsgi
+Restart=always
+KillSignal=SIGQUIT
+Type=notify
+StandardError=syslog
+NotifyAccess=all
+Environment="MY_PHONE_NUMBER=<YOUR PERSONAL PHONE NUMBER>"
+Environment="TWILIO_PHONE_NUMBER=<YOUR TWILIO PHONE NUMBER>"
+
+[Install]
+WantedBy=multi-user.target

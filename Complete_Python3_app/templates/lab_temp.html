@@ -3,7 +3,7 @@
   <title>Lab Conditions by RPi</title>
   <meta http-equiv="refresh" content="10">
   <meta name="description" content="Lab conditions - RPi">
-  <meta name="author" content="Peter Dalmaris">
+  <meta name="author" content="Billy Hare">
   <!-- Mobile Specific Metas
   –––––––––––––––––––––––––––––––––––––––––––––––––– -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -23,7 +23,7 @@
       <div class="row">
         <div class="two-third column" style="margin-top: 5%">
             <h2>Real time lab conditions</h2>
-            <h1>Temperature: {{"{0:0.1f}".format(temp) }}°C</h1>
+            <h1>Temperature: {{"{0:0.1f}".format(temp) }}°F</h1>
             <h1>Humidity: {{"{0:0.1f}".format(hum)}}%</h1>
             <p>This page refreshes every 10 seconds</p>
         </div>
@@ -50,10 +50,15 @@
   </body>
 
   <!-- Fetch jQuery -->
-  <script src="//code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+  <script src="//code.jquery.com/jquery-3.4.1.slim.min.js"></script>
+
+  <!-- Datetimepicker files start -->
+  <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jquery-datetimepicker/2.5.20/jquery.datetimepicker.min.css"/ >
+  <script src="//cdnjs.cloudflare.com/ajax/libs/jquery-datetimepicker/2.5.20/jquery.datetimepicker.full.min.js"></script>
+
 
    <!-- jstimezonedetect script start -->
-  <script src="//cdnjs.cloudflare.com/ajax/libs/jstimezonedetect/1.0.6/jstz.min.js" ></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/jstimezonedetect/1.0.7/jstz.min.js" ></script>
 <script>
 jQuery( document ).ready(function() {
     timezone = jstz.determine();

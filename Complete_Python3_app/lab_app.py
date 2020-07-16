@@ -1,21 +1,22 @@
 '''
 FILE NAME
 lab_app.py
-Version 10
 
 1. WHAT IT DOES
-This version adds support for Plotly.
+This version adds support for additional features beyond the training course
 
 2. REQUIRES
 * Any Raspberry Pi
 
 3. ORIGINAL WORK
-Raspberry Full Stack 2018, Peter Dalmaris
+Raspberry Full Stack 2020, Peter Dalmaris
 
 4. HARDWARE
 * Any Raspberry Pi
 * DHT11 or 22
 * 10KOhm resistor
+* An nRF24 transceiver module
+* A 220uF bypass capacitor
 * Breadboard
 * Wires
 
@@ -24,7 +25,6 @@ Command line terminal
 Simple text editor
 Libraries:
 from flask import Flask, request, render_template, sqlite3
-Python 3
 
 6. WARNING!
 None
@@ -49,164 +49,307 @@ from flask import Flask, request, render_template
 import time
 import datetime
 import arrow
+import sqlite3
 import sys
 import Adafruit_DHT
-import sqlite3
 import plotly.plotly as py
 from plotly.graph_objs import *
+from twilio.twiml.messaging_response import MessagingResponse
+import os
+import subprocess
+
 
 app = Flask(__name__)
-app.debug = True # Make this False if you are no longer debugging
+app.debug = False # Make this False if you are no longer debugging
 
 @app.route("/")
 def hello():
-    return "Hello World!"
+    return "Hello World! rpi4. </br></br>Get <a href='/lab_temp'> current sensor readings</a> on the Raspberry Pi."
+
+
+@app.route("/sms", methods=['GET', 'POST'])
+def sms_reply():
+    MY_PERSONAL_PHONE_NUMBER = os.environ["MY_PHONE_NUMBER"]
+    SMS_BODY = 'Body'
+    SMS_FROM = 'From'
+    resp = MessagingResponse()
+
+    if request.values[SMS_FROM] == MY_PERSONAL_PHONE_NUMBER:
+        command = request.values[SMS_BODY].lower().strip()
+
+        if command == 'commands':
+            resp_msg_str = ''
+            resp_msg_str += 'status <sensor #>: get sensor status\n'
+            resp_msg_str += 'ip: get IP addresses\n'
+            resp_msg_str += 'reboot: reboot device\n'
+            resp_msg_str += 'shutdown: shutdown device\n'
+            resp.message(resp_msg_str)
+        elif command == 'ip':
+            ip_address = subprocess.check_output("hostname -I", shell=True).decode('utf-8').replace(' ', '\n')
+            resp.message(ip_address)
+        elif command == 'reboot':
+            subprocess.call('sudo reboot now', shell=True)
+            # No need to respond
+        elif command == 'shutdown':
+            subprocess.call('sudo shutdown now', shell=True)
+            # No need to respond
+        else:
+            command_items = command.split()
+
+            if command_items[0] == 'status':
+                if len(command_items) == 2:
+                    # Get sensor number
+                    sensor_id = None
+
+                    try:
+                        sensor_id = int(command_items[1])
+                    except:
+                        resp.message('Invalid sensor ID')
+
+                    if sensor_id is not None:
+                        temperature, humidity = get_last_record(sensor_id)
+
+                        if humidity is not None and temperature is not None:
+                            deg_sign = u"\N{DEGREE SIGN}"
+
+                            # Convert to Celcius
+                            #temperature = (temperature - 32) * 5 / 9
+                            #resp_msg_str = f'Device {sensor_id} reported a temperature of {temperature}{deg_sign}C and {humidity}% humidity.'
+
+                            resp_msg_str = f'Device {sensor_id} reported a temperature of {temperature}{deg_sign}F and {humidity}% humidity.'
+                        else:
+                            resp_msg_str = f'No data available for sensor ID {sensor_id} in the last hour.'
+
+                        resp.message(resp_msg_str)
+                else:
+                    resp.message('Too many parameters for status command')
+            else:
+                resp.message('Invalid command')
+
+        return str(resp)
+    else:
+        # Ignore text messages from other mobile phone numbers.
+        return None
+
 
 @app.route("/lab_temp")
 def lab_temp():
-    humidity, temperature = Adafruit_DHT.read_retry(Adafruit_DHT.AM2302, 17)
+    #import sys
+    #import Adafruit_DHT
+    humidity, temperature = Adafruit_DHT.read_retry(Adafruit_DHT.DHT11, 17)
     if humidity is not None and temperature is not None:
+        # Convert the temperature to Fahrenheit.
+        temperature = temperature * 9/5.0 + 32
         return render_template("lab_temp.html",temp=temperature,hum=humidity)
     else:
         return render_template("no_sensor.html")
 
 @app.route("/lab_env_db", methods=['GET'])  #Add date limits in the URL #Arguments: from=2015-03-04&to=2015-03-05
 def lab_env_db():
-    temperatures, humidities, timezone, from_date_str, to_date_str = get_records()
+    temperatures, humidities, timezone, from_date_str, to_date_str, sensor_id = get_records()
 
     # Create new record tables so that datetimes are adjusted back to the user browser's time zone.
     time_adjusted_temperatures = []
     time_adjusted_humidities   = []
     for record in temperatures:
-        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm").to(timezone)
-        time_adjusted_temperatures.append([local_timedate.format('YYYY-MM-DD HH:mm'), round(record[2],2)])
+        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm:ss").to(timezone)
+        time_adjusted_temperatures.append([local_timedate.format('YYYY-MM-DD HH:mm:ss'), round(record[2],2)])
 
     for record in humidities:
-        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm").to(timezone)
-        time_adjusted_humidities.append([local_timedate.format('YYYY-MM-DD HH:mm'), round(record[2],2)])
+        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm:ss").to(timezone)
+        time_adjusted_humidities.append([local_timedate.format('YYYY-MM-DD HH:mm:ss'), round(record[2],2)])
 
-    print ("rendering lab_env_db.html with: %s, %s, %s" % (timezone, from_date_str, to_date_str))
+    print("rendering lab_env_db.html with: %s, %s, %s, sensor_id %s" % (timezone, from_date_str, to_date_str, sensor_id))
 
-    return render_template("lab_env_db.html",   timezone        = timezone,
-                                                temp            = time_adjusted_temperatures,
-                                                hum             = time_adjusted_humidities,
-                                                from_date       = from_date_str,
-                                                to_date         = to_date_str,
-                                                temp_items      = len(temperatures),
-                                                query_string    = request.query_string[0:len(request.query_string)], #This query string is used
-																						#by the Plotly link
-                                                hum_items       = len(humidities))
+    return render_template("lab_env_db.html", timezone=timezone,
+                           temp=time_adjusted_temperatures,
+                           hum=time_adjusted_humidities,
+                           from_date=from_date_str,
+                           to_date=to_date_str,
+                           temp_items=len(temperatures),
+
+                           #This query string is used by the Plotly link
+                           query_string=request.query_string,
+                           hum_items=len(humidities),
+                           sensorid=sensor_id)
 
 def get_records():
-    from_date_str 	= request.args.get('from',time.strftime("%Y-%m-%d 00:00")) #Get the from date value from the URL
-    to_date_str 	= request.args.get('to',time.strftime("%Y-%m-%d %H:%M"))   #Get the to date value from the URL
-    timezone 		= request.args.get('timezone','Etc/UTC');
-    range_h_form	= request.args.get('range_h','');  #This will return a string, if field range_h exists in the request
-    range_h_int 	= "nan"  #initialise this variable with not a number
+    # Get the from date value from the URL, or use the start of day today UTC:
+    from_date_str = request.args.get('from',time.strftime("%Y-%m-%d 00:00"))
+
+    # Get the to date value from the URL, or use now UTC)
+    to_date_str = request.args.get('to',time.strftime("%Y-%m-%d %H:%M"))
+
+    # Get the timezone, or use UTC
+    timezone = request.args.get('timezone','Etc/UTC')
+    
+    # This will return a string, if field range_h exists in the request
+    range_h_form = request.args.get('range_h','')
+
+    #initialise this variable with not a number
+    range_h_int = "nan"
+
+    #Get the sensor ID, or fall back to 1
+    sensor_id = request.args.get('sensor_id','1')
 
     print ("REQUEST:")
     print (request.args)
-    print ("from: %s, to: %s, timezone: %s" % (from_date_str, to_date_str, timezone))
 
     try:
-        range_h_int	= int(range_h_form)
+        range_h_int     = int(range_h_form)
     except:
         print ("range_h_form not a number")
 
+    print ("Received from browser: From: %s, To: %s, Timezon: %s, Range: %s, Sensor_id: %s" % (from_date_str, to_date_str, timezone, range_h_int, sensor_id))
 
-    print ("Received from browser: %s, %s, %s, %s" % (from_date_str, to_date_str, timezone, range_h_int))
-
-    if not validate_date(from_date_str):			# Validate date before sending it to the DB
-        from_date_str 	= time.strftime("%Y-%m-%d 00:00")
+    # Validate date before sending it to the DB
+    if not validate_date(from_date_str):
+        from_date_str = time.strftime("%Y-%m-%d 00:00")
     if not validate_date(to_date_str):
-        to_date_str 	= time.strftime("%Y-%m-%d %H:%M")		# Validate date before sending it to the DB
-    print ('2. From: %s, to: %s, timezone: %s' % (from_date_str,to_date_str,timezone))
-    # Create datetime object so that we can convert to UTC from the browser's local time
-    from_date_obj       = datetime.datetime.strptime(from_date_str,'%Y-%m-%d %H:%M')
-    to_date_obj         = datetime.datetime.strptime(to_date_str,'%Y-%m-%d %H:%M')
+        to_date_str = time.strftime("%Y-%m-%d %H:%M")
 
-	# If range_h is defined, we don't need the from and to times
+    print ("Time adjusted: From: %s, To: %s, Timezon: %s, Range: %s, Sensor_id: %s" % (from_date_str, to_date_str, timezone, range_h_int, sensor_id))
+
+    # Create datetime object so that we can convert to UTC from the browser's
+    # local time
+    from_date_obj = datetime.datetime.strptime(from_date_str,'%Y-%m-%d %H:%M')
+    to_date_obj = datetime.datetime.strptime(to_date_str,'%Y-%m-%d %H:%M')
+
+    # If range_h is defined, we don't need the from and to times
     if isinstance(range_h_int,int):
-        arrow_time_from = arrow.utcnow().replace(hours=-range_h_int)
-        arrow_time_to   = arrow.utcnow()
-        from_date_utc   = arrow_time_from.strftime("%Y-%m-%d %H:%M")
-        to_date_utc     = arrow_time_to.strftime("%Y-%m-%d %H:%M")
-        from_date_str   = arrow_time_from.to(timezone).strftime("%Y-%m-%d %H:%M")
-        to_date_str	    = arrow_time_to.to(timezone).strftime("%Y-%m-%d %H:%M")
+        arrow_time_from = arrow.utcnow().shift(hours=-range_h_int)
+        arrow_time_to = arrow.utcnow()
+        from_date_utc = arrow_time_from.strftime("%Y-%m-%d %H:%M")
+        to_date_utc = arrow_time_to.strftime("%Y-%m-%d %H:%M")
+        from_date_str = arrow_time_from.to(timezone).strftime("%Y-%m-%d %H:%M")
+        to_date_str = arrow_time_to.to(timezone).strftime("%Y-%m-%d %H:%M")
     else:
-		#Convert datetimes to UTC so we can retrieve the appropriate records from the database
-        from_date_utc   = arrow.get(from_date_obj, timezone).to('Etc/UTC').strftime("%Y-%m-%d %H:%M")
-        to_date_utc     = arrow.get(to_date_obj, timezone).to('Etc/UTC').strftime("%Y-%m-%d %H:%M")
+        # Convert datetimes to UTC so we can retrieve the appropriate records
+        # from the database
+        from_date_utc = arrow.get(from_date_obj, timezone).to('Etc/UTC').strftime("%Y-%m-%d %H:%M")
+        to_date_utc = arrow.get(to_date_obj, timezone).to('Etc/UTC').strftime("%Y-%m-%d %H:%M")
 
-    conn 			    = sqlite3.connect('/var/www/lab_app/lab_app.db')
-    curs 			    = conn.cursor()
-    curs.execute("SELECT * FROM temperatures WHERE rDateTime BETWEEN ? AND ?", (from_date_utc.format('YYYY-MM-DD HH:mm'), to_date_utc.format('YYYY-MM-DD HH:mm')))
-    temperatures 	    = curs.fetchall()
-    curs.execute("SELECT * FROM humidities WHERE rDateTime BETWEEN ? AND ?", (from_date_utc.format('YYYY-MM-DD HH:mm'), to_date_utc.format('YYYY-MM-DD HH:mm')))
-    humidities 		    = curs.fetchall()
+    print("From UTC: ", from_date_utc)
+    print("To UTC: ", to_date_utc)
+    print("From: ", from_date_str)
+    print("To: ", to_date_str)
+
+    conn = sqlite3.connect('/var/www/lab_app/lab_app.db')
+    curs = conn.cursor()
+
+    temp_sql = "SELECT * FROM temperatures WHERE (rDateTime BETWEEN '%s' AND '%s') AND sensorID = %s" % (from_date_utc.format('YYY-MM-DD HH:mm'), to_date_utc.format('YYY-MM-DD HH:mm'), sensor_id)
+    print(temp_sql)
+    curs.execute(temp_sql)
+    temperatures = curs.fetchall()
+
+    hum_sql = "SELECT * FROM humidities WHERE sensorID = %s AND (rDateTime BETWEEN '%s' AND '%s')" % (sensor_id, from_date_utc.format('YYYY-MM-DD HH:mm'), to_date_utc.format('YYYY-MM-DD HH:mm'))
+    curs.execute(hum_sql)
+    humidities = curs.fetchall()
+    print(temperatures)
     conn.close()
 
-    return [temperatures, humidities, timezone, from_date_str, to_date_str]
+    return [temperatures, humidities, timezone, from_date_str, to_date_str, sensor_id]
 
-@app.route("/to_plotly", methods=['GET'])  #This method will send the data to ploty.
+
+def get_last_record(sensor_id):
+    ''' Get the last temperature and humidity readings from the database over
+    the last hour for sensor_id'''
+
+    # Get datetime objects for now and one hour ago
+    to_date_utc = datetime.datetime.now()
+    to_date_str = to_date_utc.strftime('%Y-%m-%d %H:%M')
+
+    # Convert to strings needed for SQL query
+    from_date_utc = to_date_utc - datetime.timedelta(hours = 1)
+    from_date_str = from_date_utc.strftime('%Y-%m-%d %H:%M')
+
+    # Connect to the SQL database
+    conn = sqlite3.connect('/var/www/lab_app/lab_app.db')
+    curs = conn.cursor()
+
+    # Get temperature and humidity readings over the last hour
+    temp_sql = f"SELECT * FROM temperatures WHERE (rDateTime BETWEEN '{from_date_str}' AND '{to_date_str}') AND sensorID = {sensor_id}"
+    curs.execute(temp_sql)
+    temperatures = curs.fetchall()
+    print(temperatures)
+
+    hum_sql = f"SELECT * FROM humidities WHERE (rDateTime BETWEEN '{from_date_str}' AND '{to_date_str}') AND sensorID = {sensor_id}"
+
+    curs.execute(hum_sql)
+    humidities = curs.fetchall()
+    print(humidities)
+
+    current_temp = None
+    current_hum = None
+
+    if len(temperatures) and len(humidities):
+        try:
+            # Get the last record in the list for this sensor ID
+            _,_,current_temp = temperatures[-1]
+            _,_,current_hum = humidities[-1]
+        except:
+            print('Could not parse either temperature or humidity record from DB')
+
+    if current_temp is not None and current_hum is not None:
+        print(f'temp: {current_temp}, hum: {current_hum}')
+    else:
+        print(f'No records available for sensor ID {sensor_id}')
+
+    conn.close()
+    return (current_temp, current_hum)
+
+@app.route("/to_plotly", methods=['GET'])
 def to_plotly():
-	temperatures, humidities, timezone, from_date_str, to_date_str = get_records()
+    #This method will send the data to ploty.
 
-	# Create new record tables so that datetimes are adjusted back to the user browser's time zone.
-	time_series_adjusted_temperatures   = []
-	time_series_adjusted_humidities 	= []
-	time_series_temperature_values 	    = []
-	time_series_humidity_values 		= []
+    temperatures, humidities, timezone, from_date_str, to_date_str, sensor_id = get_records()
+    print(f"Plotly...timezone = {timezone}")
 
-	for record in temperatures:
-		local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm").to(timezone)
-		time_series_adjusted_temperatures.append(local_timedate.format('YYYY-MM-DD HH:mm'))
-		time_series_temperature_values.append(round(record[2],2))
+    # Create new record tables so that datetimes are adjusted back to the user
+    # browser's time zone.
+    time_series_adjusted_tempreratures = []
+    time_series_adjusted_humidities = []
+    time_series_temprerature_values = []
+    time_series_humidity_values = []
 
-	for record in humidities:
-		local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm").to(timezone)
-		time_series_adjusted_humidities.append(local_timedate.format('YYYY-MM-DD HH:mm')) #Best to pass datetime in text
-																						  #so that Plotly respects it
-		time_series_humidity_values.append(round(record[2],2))
+    for record in temperatures:
+        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm:ss").to(timezone)
+        time_series_adjusted_tempreratures.append(local_timedate.format('YYYY-MM-DD HH:mm:ss'))
+        time_series_temprerature_values.append(round(record[2],2))
 
-	temp = Scatter(
-        		x     = time_series_adjusted_temperatures,
-        		y     = time_series_temperature_values,
-        		name  = 'Temperature'
-    				)
-	hum = Scatter(
-        		x     = time_series_adjusted_humidities,
-        		y     = time_series_humidity_values,
-        		name  = 'Humidity',
-        		yaxis = 'y2'
-    				)
+    for record in humidities:
+        local_timedate = arrow.get(record[0], "YYYY-MM-DD HH:mm:ss").to(timezone)
 
-	data = Data([temp, hum])
+        # Best to pass datetime in text so that Plotly respects it
+        time_series_adjusted_humidities.append(local_timedate.format('YYYY-MM-DD HH:mm:ss'))
+        time_series_humidity_values.append(round(record[2],2))
 
-	layout = Layout(
-					title  = "Temperature and humidity in Peter's lab",
-				    xaxis  = XAxis(
-				        type      = 'date',
-				        autorange = True
-				    ),
-				    yaxis          = YAxis(
-				    	title      = 'Celcius',
-				        type       = 'linear',
-				        autorange  = True
-				    ),
-				    yaxis2 = YAxis(
-				    	title      = 'Percent',
-				        type       = 'linear',
-				        autorange  = True,
-				        overlaying = 'y',
-				        side       = 'right'
-				    )
+    temp = Scatter(x=time_series_adjusted_tempreratures,
+                   y=time_series_temprerature_values,
+                   name='Temperature')
+    hum = Scatter(x=time_series_adjusted_humidities,
+                  y=time_series_humidity_values,
+                  name='Humidity',
+                  yaxis='y2')
 
-					)
-	fig      = Figure(data = data, layout = layout)
-	plot_url = py.plot(fig, filename = 'lab_temp_hum')
+    data = Data([temp, hum])
 
-	return plot_url
+    layout = Layout(title="Temperature and humidity in Billy's lab",
+                    xaxis=XAxis(type='date',
+                                autorange=True),
+                    yaxis=YAxis(title='Fahrenheit',
+                                type='linear',
+                                autorange=True),
+                    yaxis2=YAxis(title='Percent',
+                                 type='linear',
+                                 autorange=True,
+                                 overlaying='y',
+                                 side='right'))
+
+    fig = Figure(data=data, layout=layout)
+    plot_url = py.plot(fig, filename='lab_temp_hum')
+    return plot_url
+
 
 def validate_date(d):
     try:

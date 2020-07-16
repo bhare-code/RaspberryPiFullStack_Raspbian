@@ -1,0 +1,43 @@
+#!/bin/bash
+SERVICE=$1
+COMMAND=$2
+
+if [ -z "$SERVICE" ]
+then
+    echo
+    echo "Service options..."
+    echo "   nginx   - nginx"
+    echo "   uwsgi   - emperor.uwsgi.service"
+    echo "   rf24    - rf24_receiver.service"
+else
+    if [ "$SERVICE" = "uwsgi" ]
+    then
+        SERVICE="emperor.uwsgi.service"
+    elif [ "$SERVICE" = "rf24" ]
+    then
+        SERVICE="rf24_receiver.service"
+    fi
+fi
+
+if [ -z "$COMMAND" ]
+then
+    echo
+    echo "Command options..."
+    echo "   restart - restart service"
+    echo "   start   - start service"
+    echo "   stop    - stop service"
+    echo "   enable  - enable service at bootup"
+    echo "   disable - disable service at bootup"
+    echo "   edit    - edit service configuration"
+    echo "   status  - get service status"
+else
+    echo "sudo systemctl $COMMAND $SERVICE"
+    sudo systemctl $COMMAND $SERVICE
+fi
+
+if [ "$COMMAND" = "start" ]
+then
+    echo "reloading..."
+    echo "sudo systemctl daemon-reload"
+    sudo systemctl daemon-reload
+fi
