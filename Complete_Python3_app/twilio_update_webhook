@@ -1,0 +1,2 @@
+#!/bin/bash
+twilio phone-numbers:update $TWILIO_PHONE_NUMBER --sms-url $RPIFS_SERVER_DOMAIN_NAME:$RPIFS_SERVER_INTERNAL_TCP_PORT/sms

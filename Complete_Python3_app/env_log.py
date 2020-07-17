@@ -64,8 +64,20 @@ def email_alert(device_id, temp, hum):
     report["value1"] = device_id
     report["value2"] = temp
     report["value3"] = hum
+
+    if debug_to_file:
+        log_file.write(f'Email alert report = {report}\n')
+
     key_val = os.environ["IFTTT_RPIFS_REPORT_KEY"]
+
+    if debug_to_file:
+        log_file.write(f'Email alert key_val = {key_val}\n')
+
     req_link = f"https://maker.ifttt.com/trigger/RPiFS_report/with/key/{key_val}"
+
+    if debug_to_file:
+        log_file.write(f'Email alert req_link = {req_link}\n')
+
     requests.post(req_link, data=report)
 
 def text_alert(device_id, temp, hum):
@@ -110,15 +122,35 @@ def log_values(sensor_id, temp, hum):
 
     print("Email alert if needed...")
 
+    if debug_to_file:
+        log_file.write(f'Checking if need to send alert\n')
+
     if temp > 81 or hum > 65:
         print('Sending email alert message')
+
+        if debug_to_file:
+            log_file.write(f'Sending email alert for sensor {sensor_id}\n')
+
         email_alert(sensor_id, temp, hum)
+
+        if debug_to_file:
+            log_file.write(f'Sent email alert for sensor {sensor_id}\n')
 
     if temp > 82 or hum > 70:
         print('Sending text alert message')
+
+        if debug_to_file:
+            log_file.write(f'Sending text alert for sensor {sensor_id}\n')
+
         text_alert(sensor_id, temp, hum)
 
+        if debug_to_file:
+            log_file.write(f'Sent text alert for sensor {sensor_id}\n')
+
     GPIO.output(pin, GPIO.LOW)   ## Turn off GPIO pin (LOW)
+
+debug_to_file = False
+debug_log_file = '/var/log/uwsgi/env_log.log'
 
 GPIO.setwarnings(False)
 pin = 7                    ## We're working with pin 7
@@ -126,6 +158,10 @@ GPIO.setmode(GPIO.BOARD)   ## Use BOARD pin numbering
 GPIO.setup(pin, GPIO.OUT)  ## Set pin 7 to OUTPUT
 
 humidity, temperature = Adafruit_DHT.read_retry(Adafruit_DHT.DHT11, 17)
+
+if debug_to_file:
+    log_file = open(debug_log_file, "a+")
+    log_file.write(f'Raw readings - temp: {temperature}C, hum: {humidity}%\n')
 
 # If you don't have a sensor but still wish to run this program, comment out
 # all the sensor related lines, and uncomment the following lines (these will
@@ -137,9 +173,15 @@ if humidity is not None and temperature is not None:
     # Convert the temperature to Fahrenheit.
     temperature = temperature * 9/5.0 + 32
 
+    if debug_to_file:
+        log_file.write(f'Adj readings - temp: {temperature}C, hum: {humidity}%\n')
+
     if (humidity <= 100):
         log_values("1", temperature, humidity)
     else:
         print(f'Invalid humidity reading of {humidity}')
 else:
     log_values("1", -999, -999)
+
+if debug_to_file:
+    log_file.close()
